@@ -8,7 +8,7 @@
 #include <math.h>    /* HUGE_VAL */
 #include <stdlib.h>  /* NULL, malloc(), realloc(), free(), strtod() */
 #include <string.h>  /* memcpy() */
-
+#include<stdio.h>
 #ifndef LEPT_PARSE_STACK_INIT_SIZE
 #define LEPT_PARSE_STACK_INIT_SIZE 256
 #endif
@@ -17,7 +17,6 @@
 #define ISDIGIT(ch)         ((ch) >= '0' && (ch) <= '9')
 #define ISDIGIT1TO9(ch)     ((ch) >= '1' && (ch) <= '9')
 #define PUTC(c, ch)         do { *(char*)lept_context_push(c, sizeof(char)) = (ch); } while(0)
-
 typedef struct {
     const char* json;
     char* stack;
@@ -91,19 +90,69 @@ static int lept_parse_number(lept_context* c, lept_value* v) {
 }
 
 static const char* lept_parse_hex4(const char* p, unsigned* u) {
-    /* \TODO */
+    /* \TODO 解析 p+1 ... p+4解析 4 位十六进数字，存储为码点 u。这个函数在成功时返回解析后的文本指针，失败返回 NULL*/
+    assert(p!=NULL);
+    /*!*/
+    *u = 0;
+    for(int i=0;i<4;i++){
+        char ch = *p++;
+        *u <<=4;
+        if(ISDIGIT(ch) ){
+            *u |= (ch - '0');
+        }
+        else if(ch<='F' && ch>='A'){
+            *u |= (ch - ('A'-10));
+        }
+        else if(ch>='a' && ch<='f'){
+            *u |= (ch - ('a'-10));
+        }
+        else{
+            return NULL;/* error*/
+        }
+        // if(i<4)
+        //     *u = *u<<(4);
+    }
+    // printf("LINE: %d:%u\n",__LINE__,*u);
+    
+    /* p 后四位 to u*/
+    // p+=5;
     return p;
 }
 
 static void lept_encode_utf8(lept_context* c, unsigned u) {
-    /* \TODO */
+    /* \TODO和编码表对照 */
+    if(u<=0x7f){
+        PUTC(c,u&0xFF);
+    }
+    else if(u<=0x07FF){
+        PUTC(c,0xC0 | ((u>>6) & 0xFF)); /*0xC0 就是 110xxxxx的那个 110 */
+        PUTC(c,0x80 | ( u        & 0x3F)); /*后6位 0x3F = 00111111 */
+
+    }
+    else if( u<=0xFFFF){
+        PUTC(c,0xE0 | ((u >> 12) & 0xFF)); /* 0xE0 = 11100000 */
+        PUTC(c,0x80 | ((u >>  6) & 0x3F)); /* 0x80 = 10000000 */
+        PUTC(c,0x80 | ( u        & 0x3F)); /* 0x3F = 00111111 */
+    }
+    else if( u<=0x10FFFF){
+        PUTC(c, 0xF0 | ((u >> 18) & 0xFF));
+        PUTC(c,0x80 | ((u >> 12) & 0x3F)); /* 0xE0 = 11100000 */
+        PUTC(c,0x80 | ((u >>  6) & 0x3F)); /* 0x80 = 10000000 */
+        PUTC(c,0x80 | ( u        & 0x3F)); /* 0x3F = 00111111 */
+    }else{
+        printf("LINE: %d:%u\n",__LINE__,u);
+        // return NULL;
+    }
+    /*把码点编码成 UTF-8，写进缓冲区? 。c->top += size
+    写入x个byte?*/
+
 }
 
 #define STRING_ERROR(ret) do { c->top = head; return ret; } while(0)
 
 static int lept_parse_string(lept_context* c, lept_value* v) {
     size_t head = c->top, len;
-    unsigned u;
+    unsigned u,u2;
     const char* p;
     EXPECT(c, '\"');
     p = c->json;
@@ -129,6 +178,24 @@ static int lept_parse_string(lept_context* c, lept_value* v) {
                         if (!(p = lept_parse_hex4(p, &u)))
                             STRING_ERROR(LEPT_PARSE_INVALID_UNICODE_HEX);
                         /* \TODO surrogate handling */
+                        if(u>= 0xD800 && u<=0xDBFF){// have other one 
+                            if(*p++ != '\\'){// fisrt come  \u
+                                STRING_ERROR(LEPT_PARSE_INVALID_UNICODE_SURROGATE);
+                            }
+                            if(*p++ != 'u'){
+                                STRING_ERROR(LEPT_PARSE_INVALID_UNICODE_SURROGATE);
+                            }
+                            if(!(p=lept_parse_hex4(p,&u2))){
+                                STRING_ERROR(LEPT_PARSE_INVALID_UNICODE_SURROGATE);
+                            }
+                            if(u2 > 0xDFFF || u2<0xDC00){
+                                STRING_ERROR(LEPT_PARSE_INVALID_UNICODE_SURROGATE);
+                            }
+                            /*!!!!加到之前的u上面 !!  */
+                            /*u = (u-0xD800)*0x400 + (u2-0xDC00) + 0x10000; */
+                            u = (((u-0xD800)*0x400) + (u2 - 0xDC00)) + 0x10000;
+                        }
+
                         lept_encode_utf8(c, u);
                         break;
                     default:
