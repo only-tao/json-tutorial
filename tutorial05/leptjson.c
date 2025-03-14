@@ -23,7 +23,7 @@ typedef struct {
     char* stack;
     size_t size, top;
 }lept_context;
-
+/*返回指向这个item的指针  return c->stack+c->top ,c->top+=size*/
 static void* lept_context_push(lept_context* c, size_t size) {
     void* ret;
     assert(size > 0);
@@ -187,6 +187,7 @@ static int lept_parse_array(lept_context* c, lept_value* v) {
     size_t size = 0;
     int ret;
     EXPECT(c, '[');
+    lept_parse_whitespace(c);
     if (*c->json == ']') {
         c->json++;
         v->type = LEPT_ARRAY;
@@ -197,10 +198,13 @@ static int lept_parse_array(lept_context* c, lept_value* v) {
     for (;;) {
         lept_value e;
         lept_init(&e);
+        
         if ((ret = lept_parse_value(c, &e)) != LEPT_PARSE_OK)
             return ret;
-        memcpy(lept_context_push(c, sizeof(lept_value)), &e, sizeof(lept_value));
-        size++;
+        lept_parse_whitespace(c);
+        memcpy(lept_context_push(c, sizeof(lept_value)), &e, sizeof(lept_value));// c->top往后挪, 分配内存, e的byte复制到c
+        //练习5: 如果直接使用是不是不知道空间需要多少？ 可能越界??
+        size++;//这个array 有size个元素
         if (*c->json == ',')
             c->json++;
         else if (*c->json == ']') {

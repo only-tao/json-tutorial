@@ -132,9 +132,13 @@ static void test_parse_array() {
 
     lept_init(&v);
     EXPECT_EQ_INT(LEPT_PARSE_OK, lept_parse(&v, "[ ]"));
-    EXPECT_EQ_INT(LEPT_ARRAY, lept_get_type(&v));
-    EXPECT_EQ_SIZE_T(0, lept_get_array_size(&v));
+    EXPECT_EQ_INT(LEPT_ARRAY, lept_get_type(&v));// type
+    EXPECT_EQ_SIZE_T(0, lept_get_array_size(&v)); // size 
+    // value !!! 
     lept_free(&v);
+    
+    
+
 }
 
 #define TEST_ERROR(error, json)\
