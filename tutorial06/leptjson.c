@@ -38,7 +38,7 @@ static void* lept_context_push(lept_context* c, size_t size) {
     c->top += size;
     return ret;
 }
-
+/* c->stack  + c->top-= size*/
 static void* lept_context_pop(lept_context* c, size_t size) {
     assert(c->top >= size);
     return c->stack + (c->top -= size);
@@ -126,9 +126,12 @@ static void lept_encode_utf8(lept_context* c, unsigned u) {
 }
 
 #define STRING_ERROR(ret) do { c->top = head; return ret; } while(0)
-
-static int lept_parse_string(lept_context* c, lept_value* v) {
-    size_t head = c->top, len;
+/*
+input c, **str, len,
+get **str, 这里只有地址,后面的malloc
+*/
+static int lept_parse_string_raw(lept_context* c,char** str,size_t* len){
+    size_t head = c->top;
     unsigned u, u2;
     const char* p;
     EXPECT(c, '\"');
@@ -137,8 +140,9 @@ static int lept_parse_string(lept_context* c, lept_value* v) {
         char ch = *p++;
         switch (ch) {
             case '\"':
-                len = c->top - head;
-                lept_set_string(v, (const char*)lept_context_pop(c, len), len);
+                *len = c->top - head;
+                /* lept_set_string_fors(*str,(const char*)lept_context_pop(c, *len), *len); 最外面还有set_string,因此这里不需要malloc*/
+                *str = lept_context_pop(c,*len);
                 c->json = p;
                 return LEPT_PARSE_OK;
             case '\\':
@@ -179,6 +183,17 @@ static int lept_parse_string(lept_context* c, lept_value* v) {
                 PUTC(c, ch);
         }
     }
+}
+
+
+static int lept_parse_string(lept_context* c, lept_value* v) {
+    int ret;
+    char* s;
+    size_t len;
+    if((ret=lept_parse_string_raw(c,&s,&len))==LEPT_PARSE_OK){
+        lept_set_string(v,s,len);
+    }
+    return ret;
 }
 
 static int lept_parse_value(lept_context* c, lept_value* v);
@@ -242,18 +257,61 @@ static int lept_parse_object(lept_context* c, lept_value* v) {
     m.k = NULL;
     size = 0;
     for (;;) {
+        char* s_k;
         lept_init(&m.v);
         /* \todo parse key to m.k, m.klen */
+        if(*c->json !='"'){
+            ret = LEPT_PARSE_MISS_KEY;
+            break;
+        }
+        if((ret = lept_parse_string_raw(c,s_k,&m.klen))!=LEPT_PARSE_OK){
+            /*ret = LEPT_PARSE_MISS_KEY;*/
+            break;
+        }
+        memcpy(m.k = (char*)malloc(m.klen+1),s_k,m.klen);
+        m.k[m.klen] = 0;
         /* \todo parse ws colon ws */
+        lept_parse_whitespace(c);
+        if (*c->json == ':') {
+            c->json++;
+        }else{
+            ret = LEPT_PARSE_MISS_COLON;
+            break;
+        }       
+        lept_parse_whitespace(c);
         /* parse value */
         if ((ret = lept_parse_value(c, &m.v)) != LEPT_PARSE_OK)
             break;
         memcpy(lept_context_push(c, sizeof(lept_member)), &m, sizeof(lept_member));
         size++;
+        /*入栈
+        memcpy(lept_context_push(c,sizeof(lept_member)),&m,sizeof(lept_member));*/
         m.k = NULL; /* ownership is transferred to member on stack */
+        m.klen = 0;
         /* \todo parse ws [comma | right-curly-brace] ws */
+        lept_parse_whitespace(c);
+        if( c->json == ','){
+            c->json ++;
+            lept_parse_whitespace(c);
+        }
+        else if(*c->json == '}'){
+            c->json ++;
+            v->type = LEPT_OBJECT;
+            /*v->u.o.m = ; ?? 临时变量 还是new 一个新的?? */
+            memcpy((v->u.o.m=(lept_member*)malloc(size)),lept_context_pop(c,size),size);/*分配 size个 addr, size ? size * ?? */
+            v->u.o.size = size*sizeof(lept_value);
+            return LEPT_PARSE_OK;
+        }else{
+            ret = LEPT_PARSE_MISS_COMMA_OR_CURLY_BRACKET;
+            break;
+        }
+        lept_parse_whitespace(c);
     }
     /* \todo Pop and free members on the stack */
+    size_t i;
+    for(i=0;i<size;i++){
+        lept_free((lept_member*) lept_context_pop(c,sizeof(lept_member)));
+    }
     return ret;
 }
 

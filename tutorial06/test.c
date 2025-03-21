@@ -352,9 +352,7 @@ static void test_parse() {
     test_parse_number();
     test_parse_string();
     test_parse_array();
-#if 0
     test_parse_object();
-#endif
 
     test_parse_expect_value();
     test_parse_invalid_value();
