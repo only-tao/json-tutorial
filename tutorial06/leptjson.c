@@ -264,7 +264,7 @@ static int lept_parse_object(lept_context* c, lept_value* v) {
             ret = LEPT_PARSE_MISS_KEY;
             break;
         }
-        if((ret = lept_parse_string_raw(c,s_k,&m.klen))!=LEPT_PARSE_OK){
+        if((ret = lept_parse_string_raw(c,&s_k,&m.klen))!=LEPT_PARSE_OK){
             /*ret = LEPT_PARSE_MISS_KEY;*/
             break;
         }
@@ -284,22 +284,22 @@ static int lept_parse_object(lept_context* c, lept_value* v) {
             break;
         memcpy(lept_context_push(c, sizeof(lept_member)), &m, sizeof(lept_member));
         size++;
-        /*入栈
-        memcpy(lept_context_push(c,sizeof(lept_member)),&m,sizeof(lept_member));*/
         m.k = NULL; /* ownership is transferred to member on stack */
         m.klen = 0;
         /* \todo parse ws [comma | right-curly-brace] ws */
         lept_parse_whitespace(c);
-        if( c->json == ','){
+        if( *c->json == ','){
             c->json ++;
             lept_parse_whitespace(c);
         }
         else if(*c->json == '}'){
+            size_t s = sizeof(lept_member)*size;
             c->json ++;
             v->type = LEPT_OBJECT;
             /*v->u.o.m = ; ?? 临时变量 还是new 一个新的?? */
-            memcpy((v->u.o.m=(lept_member*)malloc(size)),lept_context_pop(c,size),size);/*分配 size个 addr, size ? size * ?? */
-            v->u.o.size = size*sizeof(lept_value);
+            memcpy((v->u.o.m=(lept_member*)malloc(s)),lept_context_pop(c,s),s);/*分配 size个 addr, size ? size * ?? 
+            这里是 size*  弄错了 !! */
+            v->u.o.size = size; /*!! */
             return LEPT_PARSE_OK;
         }else{
             ret = LEPT_PARSE_MISS_COMMA_OR_CURLY_BRACKET;
@@ -309,9 +309,13 @@ static int lept_parse_object(lept_context* c, lept_value* v) {
     }
     /* \todo Pop and free members on the stack */
     size_t i;
+    free(m.k);
     for(i=0;i<size;i++){
-        lept_free((lept_member*) lept_context_pop(c,sizeof(lept_member)));
+        lept_member* m = (lept_member*) lept_context_pop(c,sizeof(lept_member));
+        free(m->k); /*常规free*/
+        lept_free(&m->v);/* free 自己的 */
     }
+    v->type = LEPT_NULL;/* null ?  v 就是传入的 value - > ob j */
     return ret;
 }
 
@@ -360,6 +364,14 @@ void lept_free(lept_value* v) {
             for (i = 0; i < v->u.a.size; i++)
                 lept_free(&v->u.a.e[i]);
             free(v->u.a.e);
+            break;
+        case LEPT_OBJECT:
+        /* 还有 key ,value 的key, member没有处理啊 !! */
+            for(i=0;i< v->u.o.size;i++){
+                free(v->u.o.m[i].k);
+                lept_free(&v->u.o.m[i].v);
+            }
+            free(v->u.o.m);
             break;
         default: break;
     }
