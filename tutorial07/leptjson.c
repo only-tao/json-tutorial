@@ -33,7 +33,7 @@ typedef struct {
 static void* lept_context_push(lept_context* c, size_t size) {
     void* ret;
     assert(size > 0);
-    if (c->top + size >= c->size) {
+    if (c->top + size >= c->size) {/*一次开辟大空间 len*6 + 2 */
         if (c->size == 0)
             c->size = LEPT_PARSE_STACK_INIT_SIZE;
         while (c->top + size >= c->size)
@@ -347,9 +347,100 @@ int lept_parse(lept_value* v, const char* json) {
 }
 
 static void lept_stringify_string(lept_context* c, const char* s, size_t len) {
-    /* ... */
-}
+    /* attention <0x20 */
+    /* begin with / */
 
+    size_t i;
+    assert(s!=NULL);
+    PUTC(c,'\"');
+    for(i = 0;i<len;i++){
+        unsigned char ch = (unsigned char)s[i];/*需要是无符号的!!*/
+        switch (ch)
+        {
+        case '\"': /*add  \  add " */
+           /*  PUTC(c,'\\');
+            PUTC(c,'\"');break; 变成PUTS*/
+            PUTS(c,"\\\"",2);break;
+        case '\\':
+            PUTC(c,'\\');
+            PUTC(c,'\\');break;
+        case '\b':
+            PUTC(c,'\\');
+            PUTC(c,'b');  break;
+        case '\f':
+            PUTC(c,'\\');
+            PUTC(c,'f');  break;
+        case '\n':
+            PUTC(c,'\\');
+            PUTC(c,'n');  break;
+        case '\r':
+            PUTC(c,'\\');
+            PUTC(c,'r');  break;
+        case '\t':
+            PUTC(c,'\\');
+            PUTC(c,'t');  break;
+        default:
+            if(ch<0x20){/* \u00xx <=  0010 0000 */
+                /*int len  = 7;
+                unsigned char n1 = (1<<4) -1;
+                unsigned char n2 = (1<<8) -1 -n1;
+                char x[7] = "\\u00xx";
+                n1 &= s[i]; => 需要转化到 0-F
+                n2 &= s[i];
+                x[4] = n1;
+                x[5] = n2;
+                x[6] = '\0';
+                printf("%c",x[0]);
+                printf("%c",x[1]);PUTS(c,x,len-1);
+                
+                优化:
+                 static const char hex_digits[] = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F' };
+                 *p++ = '\\'; *p++ = 'u'; *p++ = '0'; *p++ = '0';
+                    *p++ = hex_digits[ch >> 4];
+                    *p++ = hex_digits[ch & 15]; 
+                */
+
+                
+                
+               
+               char buffer[7];
+               sprintf(buffer,"\\u%04X",ch);
+               PUTS(c,buffer,6);
+            }else{
+                PUTC(c,ch);
+            }
+            break;
+        }
+    }
+    PUTC(c,'\"');
+}
+static void lept_stringify_value(lept_context* c, const lept_value* v);
+static void lept_arrarify(lept_context* c,const lept_value* e,const size_t len){    
+    /* c*/
+    size_t i;
+    PUTC(c,'[');
+    for(i=0;i<len;i++){
+        lept_stringify_value(c,e+i);
+        if(i!=len-1){
+            PUTC(c,',');
+        }
+    }
+    PUTC(c,']');
+
+}
+static void lept_objectify(lept_context* c, const lept_member* m,const size_t len) {
+    size_t i;
+    PUTC(c,'{');
+    for(i=0;i<len;i++){
+        lept_stringify_string(c,m[i].k,m[i].klen);
+        PUTC(c,':');
+        lept_stringify_value(c,&m[i].v);
+        if(i!=len-1)
+            PUTC(c,',');
+        
+    }
+    PUTC(c,'}');
+}
 static void lept_stringify_value(lept_context* c, const lept_value* v) {
     switch (v->type) {
         case LEPT_NULL:   PUTS(c, "null",  4); break;
@@ -358,10 +449,10 @@ static void lept_stringify_value(lept_context* c, const lept_value* v) {
         case LEPT_NUMBER: c->top -= 32 - sprintf(lept_context_push(c, 32), "%.17g", v->u.n); break;
         case LEPT_STRING: lept_stringify_string(c, v->u.s.s, v->u.s.len); break;
         case LEPT_ARRAY:
-            /* ... */
+            lept_arrarify(c, v->u.a.e, v->u.a.size);
             break;
         case LEPT_OBJECT:
-            /* ... */
+            lept_objectify(c,v->u.o.m, v->u.o.size);
             break;
         default: assert(0 && "invalid type");
     }
